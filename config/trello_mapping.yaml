@@ -1,0 +1,14 @@
+# Trello list name → Notion Status select value.
+# Lists not listed here pass through with their original name as the status.
+# Cards in CLOSED Trello lists are never synced — that's enforced in code via
+# the list's `closed` flag, not via this file.
+status_by_list:
+  "Recursos para Projetos": "Recursos"
+  "Perguntas para a Próxima Reunião": "Perguntas"
+  "A fazer": "A fazer"
+  "Bloqueio": "Bloqueio"
+  "Concluído": "Concluído"
+
+# Trello label name → Notion multi-select Tag value.
+# Empty map = passthrough (use Trello label names as-is).
+tags_by_label: {}
