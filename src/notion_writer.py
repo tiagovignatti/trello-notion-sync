@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,20 @@ NOTION_API = "https://api.notion.com/v1"
 # "data sources" and move /databases/{id}/query elsewhere; staying on this
 # version keeps the simple model that fits a single-source-per-DB use case.
 NOTION_VERSION = "2022-06-28"
+
+# Retry transient Notion failures (timeouts, dropped connections, 5xx, 429).
+# At-least-once semantics: a ReadTimeout that actually landed server-side
+# could double-apply on retry — most visibly, a retried POST /pages would
+# create a duplicate. The risk already exists today because a single failure
+# aborts the batch and the next cron retries everything; per-call retry just
+# narrows the window. Acceptable at personal volume.
+_MAX_RETRIES = 3
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
+_RETRY_EXCEPTIONS = (
+    httpx.TimeoutException,
+    httpx.RemoteProtocolError,
+    httpx.ConnectError,
+)
 
 
 class NotionWriter:
@@ -109,25 +124,37 @@ class NotionWriter:
         if new_blocks:
             self._patch(f"/blocks/{page_id}/children", {"children": new_blocks})
 
+    def _send(self, method: str, path: str, body: dict | None = None) -> dict:
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                r = self._client.request(method, path, json=body)
+            except _RETRY_EXCEPTIONS as e:
+                last_exc = e
+                if attempt + 1 == _MAX_RETRIES:
+                    raise
+                time.sleep(2 ** attempt)
+                continue
+            if r.status_code in _RETRY_STATUSES and attempt + 1 < _MAX_RETRIES:
+                retry_after = r.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after else 2 ** attempt
+                time.sleep(min(delay, 10))
+                continue
+            r.raise_for_status()
+            return r.json()
+        raise last_exc  # pragma: no cover
+
     def _post(self, path: str, body: dict) -> dict:
-        r = self._client.post(path, json=body)
-        r.raise_for_status()
-        return r.json()
+        return self._send("POST", path, body)
 
     def _patch(self, path: str, body: dict) -> dict:
-        r = self._client.patch(path, json=body)
-        r.raise_for_status()
-        return r.json()
+        return self._send("PATCH", path, body)
 
     def _get(self, path: str) -> dict:
-        r = self._client.get(path)
-        r.raise_for_status()
-        return r.json()
+        return self._send("GET", path)
 
     def _delete(self, path: str) -> dict:
-        r = self._client.delete(path)
-        r.raise_for_status()
-        return r.json()
+        return self._send("DELETE", path)
 
     def prune_unused_status_options(self) -> list[str]:
         """Remove Status select options no live page references. Returns removed names.
