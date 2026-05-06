@@ -12,7 +12,7 @@ Trello API ──► sources/trello.py ──► Item ──► notion_writer.py
                   (future) sources/keep.py ─┘
 ```
 
-State (the last-processed Trello action ID) lives in `state/trello_last_action.json` and is committed back to the repo after each successful run. The repo is the source of truth for sync state — no external DB.
+State (the last-processed Trello action ID) lives in `state/trello_last_action.json`. To keep `main` free of per-poll churn, state is persisted to a dedicated **`state`** branch (orphan, code-free) — the workflow restores it at the start of each run and pushes back at the end. The repo is still the source of truth for sync state; no external DB.
 
 ## Setup
 
@@ -49,12 +49,18 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
+# (Optional) Seed local state from CI's marker so the next sync is incremental
+# instead of a full backfill:
+git fetch origin state && git checkout origin/state -- state/
+
 # Validate Trello fetch + transform without touching Notion:
 python -m src.sync trello --dry-run
 
 # Real sync (requires NOTION_TOKEN + NOTION_DATABASE_ID):
 python -m src.sync trello
 ```
+
+`state/` is gitignored on `main` — local sync runs leave their state file untracked.
 
 ### 4. GitHub Actions
 

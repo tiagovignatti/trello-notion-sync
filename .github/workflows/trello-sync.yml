@@ -10,7 +10,7 @@ concurrency:
   group: trello-sync
   cancel-in-progress: false
 
-# Required so the auto-commit step can push state file changes.
+# Required so the state-branch push step can write to origin.
 permissions:
   contents: write
 
@@ -19,6 +19,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Sync state lives on the orphan `state` branch, not main, so main's
+      # log stays code-only. Restore the state files into the working tree
+      # before running sync. No-op on the very first run (branch absent).
+      - name: Restore state from `state` branch
+        run: |
+          if git ls-remote --exit-code --heads origin state >/dev/null 2>&1; then
+            git fetch origin state
+            git checkout FETCH_HEAD -- state/
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -38,10 +48,37 @@ jobs:
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: python -m src.sync trello
 
-      # Only commits when state/*.json actually changed. Skipped on prior failure.
-      - name: Commit state
+      # Push state files to the `state` branch (orphan, code-free) instead of
+      # main. Snapshot the new state, switch the working tree onto `state`
+      # (or create it as orphan), restore the snapshot, push iff the file
+      # actually differs from the previous tip.
+      - name: Push state to `state` branch
         if: success()
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore(state): sync run #${{ github.run_number }}"
-          file_pattern: 'state/*.json'
+        run: |
+          set -e
+          [ -f state/trello_last_action.json ] || { echo "[state] nothing to push"; exit 0; }
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          STATE_SNAPSHOT=$(mktemp -d)
+          cp -r state/. "$STATE_SNAPSHOT/"
+
+          if git ls-remote --exit-code --heads origin state >/dev/null 2>&1; then
+            git fetch origin state
+            git checkout -B state FETCH_HEAD
+          else
+            git checkout --orphan state
+          fi
+          git rm -rf . >/dev/null 2>&1 || true
+
+          mkdir -p state
+          cp -r "$STATE_SNAPSHOT/." state/
+          git add state/
+
+          if git diff --cached --quiet; then
+            echo "[state] no diff to push"
+          else
+            git commit -m "chore(state): sync run #${{ github.run_number }}"
+            git push origin state
+          fi
