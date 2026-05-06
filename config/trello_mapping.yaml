@@ -4,7 +4,6 @@
 # the list's `closed` flag, not via this file.
 status_by_list:
   "Recursos para Projetos": "Recursos"
-  "Perguntas para a Próxima Reunião": "Perguntas"
   "A fazer": "A fazer"
   "Bloqueio": "Bloqueio"
   "Concluído": "Concluído"
