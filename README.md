@@ -76,6 +76,7 @@ Edit `config/trello_mapping.yaml` to rename Trello lists/labels on the way into 
 
 - **Closed Trello lists at backfill** (first run): their cards are skipped to keep the initial import clean.
 - **Archiving a Trello list during incremental sync** propagates to Notion: every card in the newly-closed list is force re-fetched and marked archived. Symmetric for un-archive — re-opening a list restores its cards' pages.
+- **Renaming a Trello list** also force re-fetches every card in that list so the Notion `Status` property catches up. The auto-prune (below) cleans the old Status option once no live page references it.
 - **Archived Trello cards** mark their Notion page archived (page-level archive) but keep the page in place. Un-archiving in Trello restores it.
 - **First run** is a full backfill of every open card on every open list. The marker is then advanced to Trello's most recent action.
 - **Failed item** during a batch: the run exits non-zero, state is NOT advanced, and the next run retries everything since the last good marker. Successful upserts are idempotent.

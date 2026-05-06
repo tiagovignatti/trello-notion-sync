@@ -141,12 +141,12 @@ def card_to_item(
     )
 
 
-def list_ids_with_closed_toggle(actions: list[dict]) -> list[str]:
-    """List IDs whose `closed` flag flipped in either direction within this batch.
+def list_ids_to_resync(actions: list[dict]) -> list[str]:
+    """List IDs whose state changed in a way that invalidates member cards' sync.
 
-    Both archive (false→true) and un-archive (true→false) are returned —
-    callers re-fetch the cards in those lists and the transform handles the
-    direction via the current list state.
+    Captures `closed` toggles (archive/un-archive) and `name` changes — both
+    affect Notion-side state for every card in the list (archive flag and
+    Status text respectively). Other list updates (position, etc.) are ignored.
     """
     seen: set[str] = set()
     out: list[str] = []
@@ -155,8 +155,8 @@ def list_ids_with_closed_toggle(actions: list[dict]) -> list[str]:
             continue
         data = action.get("data") or {}
         old = data.get("old") or {}
-        if "closed" not in old:
-            continue  # updateList for something other than the closed flag
+        if "closed" not in old and "name" not in old:
+            continue
         list_obj = data.get("list") or {}
         list_id = list_obj.get("id")
         if not list_id or list_id in seen:

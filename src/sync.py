@@ -14,7 +14,7 @@ from src.sources.trello import (
     TrelloClient,
     card_ids_from_actions,
     card_to_item,
-    list_ids_with_closed_toggle,
+    list_ids_to_resync,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -85,10 +85,11 @@ def sync_trello(*, dry_run: bool) -> int:
             actions = trello.get_actions_since(last_action_id)
 
             # Cards directly touched by card-related actions, plus cards in any
-            # list whose closed flag toggled in this batch (force re-sync so
-            # list-archive propagates to Notion-archive).
+            # list whose state changed in a way that affects member cards
+            # (archive toggle or rename) — force re-sync so propagation
+            # reaches Notion.
             card_ids: set[str] = set(card_ids_from_actions(actions))
-            for list_id in list_ids_with_closed_toggle(actions):
+            for list_id in list_ids_to_resync(actions):
                 try:
                     for card in trello.get_cards_in_list(list_id):
                         card_ids.add(card["id"])

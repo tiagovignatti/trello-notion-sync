@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from src.sources.trello import (
     card_ids_from_actions,
     card_to_item,
-    list_ids_with_closed_toggle,
+    list_ids_to_resync,
 )
 
 
@@ -104,7 +104,7 @@ def test_card_to_item_archives_when_card_closed_even_if_list_open():
     assert item.archived is True
 
 
-def test_list_ids_with_closed_toggle_picks_up_both_directions():
+def test_list_ids_to_resync_picks_up_close_toggle_and_rename():
     actions = [
         {"type": "updateList", "data": {
             "list": {"id": "L1", "closed": True},
@@ -115,15 +115,19 @@ def test_list_ids_with_closed_toggle_picks_up_both_directions():
             "old": {"closed": True},
         }},
         {"type": "updateList", "data": {
-            "list": {"id": "L3", "name": "Renamed"},
-            "old": {"name": "Old name"},  # not a closed-toggle
+            "list": {"id": "L3", "name": "Em progresso"},
+            "old": {"name": "Perguntas para a Próxima Reunião"},
+        }},
+        {"type": "updateList", "data": {
+            "list": {"id": "L4", "pos": 1024},
+            "old": {"pos": 512},  # position change — ignored
         }},
         {"type": "createCard", "data": {"card": {"id": "c1"}}},  # ignored
     ]
-    assert sorted(list_ids_with_closed_toggle(actions)) == ["L1", "L2"]
+    assert sorted(list_ids_to_resync(actions)) == ["L1", "L2", "L3"]
 
 
-def test_list_ids_with_closed_toggle_dedupes():
+def test_list_ids_to_resync_dedupes():
     actions = [
         {"type": "updateList", "data": {
             "list": {"id": "L1", "closed": True},
@@ -134,7 +138,7 @@ def test_list_ids_with_closed_toggle_dedupes():
             "old": {"closed": True},
         }},
     ]
-    assert list_ids_with_closed_toggle(actions) == ["L1"]
+    assert list_ids_to_resync(actions) == ["L1"]
 
 
 def test_card_ids_from_actions_dedupes_in_order():
