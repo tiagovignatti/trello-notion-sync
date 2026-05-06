@@ -153,25 +153,38 @@ def sync_trello(*, dry_run: bool) -> int:
             return 1
 
         new_marker = trello.get_latest_action_id() or last_action_id
-        save_state(state_path, {
-            "board_id": board_id,
-            "last_action_id": new_marker,
-            "last_synced_at": datetime.now(timezone.utc).isoformat(),
-            "items_synced_total": state.get("items_synced_total", 0) + success_count,
-        })
+        # Skip writes (state file + Notion prune) when nothing actually changed:
+        # zero items synced, marker didn't advance, and we're not on the first
+        # run. Avoids ~96 noise commits/day from cron polling an idle board.
+        state_dirty = (
+            success_count > 0
+            or new_marker != last_action_id
+            or last_action_id is None
+        )
 
-        # Best-effort cleanup of stale Status options. State is already saved,
-        # so a failure here doesn't invalidate the sync.
         try:
-            removed = writer.prune_unused_status_options()
-            if removed:
-                _log(f"pruned status options: {', '.join(removed)}")
-        except Exception as e:
-            _log(f"prune failed (non-fatal): {e}")
+            if state_dirty:
+                save_state(state_path, {
+                    "board_id": board_id,
+                    "last_action_id": new_marker,
+                    "last_synced_at": datetime.now(timezone.utc).isoformat(),
+                    "items_synced_total": state.get("items_synced_total", 0) + success_count,
+                })
+                # Best-effort cleanup of stale Status options. State is already
+                # saved so a failure here doesn't invalidate the sync.
+                try:
+                    removed = writer.prune_unused_status_options()
+                    if removed:
+                        _log(f"pruned status options: {', '.join(removed)}")
+                except Exception as e:
+                    _log(f"prune failed (non-fatal): {e}")
         finally:
             writer.close()
 
-        _log(f"OK: {success_count} item(s); marker={new_marker}")
+        if state_dirty:
+            _log(f"OK: {success_count} item(s); marker={new_marker}")
+        else:
+            _log("OK: no change")
         return 0
     finally:
         trello.close()
