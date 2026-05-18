@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,6 +9,14 @@ import httpx
 from src.item import Item
 
 TRELLO_API = "https://api.trello.com/1"
+
+_MAX_RETRIES = 3
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
+_RETRY_EXCEPTIONS = (
+    httpx.TimeoutException,
+    httpx.RemoteProtocolError,
+    httpx.ConnectError,
+)
 
 # Trello action types that touch a card's representation. Used to decide which
 # cards to re-fetch during incremental sync. We re-fetch the whole card rather
@@ -37,9 +46,26 @@ class TrelloClient:
         return {"key": self.api_key, "token": self.token, **kw}
 
     def _get(self, path: str, **params: str) -> Any:
-        r = self._client.get(f"{TRELLO_API}{path}", params=self._params(**params))
-        r.raise_for_status()
-        return r.json()
+        url = f"{TRELLO_API}{path}"
+        query = self._params(**params)
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                r = self._client.get(url, params=query)
+            except _RETRY_EXCEPTIONS as e:
+                last_exc = e
+                if attempt + 1 == _MAX_RETRIES:
+                    raise
+                time.sleep(2 ** attempt)
+                continue
+            if r.status_code in _RETRY_STATUSES and attempt + 1 < _MAX_RETRIES:
+                retry_after = r.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after else 2 ** attempt
+                time.sleep(min(delay, 10))
+                continue
+            r.raise_for_status()
+            return r.json()
+        raise last_exc  # pragma: no cover
 
     def get_lists(self, *, only_open: bool = True) -> list[dict]:
         return self._get(
